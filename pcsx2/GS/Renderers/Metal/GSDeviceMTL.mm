@@ -921,6 +921,11 @@ GSMTLRenderEncoder GSDeviceMTL::CreateRenderEncoder(MTLRenderPassDescriptor* des
 
 GSMTLBlitEncoder GSDeviceMTL::CreateBlitEncoder()
 {
+	// Only one encoder may be open on a command buffer. The late upload encoder lives on the render
+	// command buffer, so close it first (e.g. a texture update followed by a readback in the same draw).
+	if (m_late_texture_upload_encoder)
+		m_late_texture_upload_encoder.End();
+
 	GSMTLBlitEncoder enc;
 	enc.m_serial = ++m_blit_encoder_serial;
 	if (m_use_mtl4)
