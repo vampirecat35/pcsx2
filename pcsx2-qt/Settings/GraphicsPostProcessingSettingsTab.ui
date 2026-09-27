@@ -247,15 +247,74 @@
         </item>
        </widget>
       </item>
-      <item row="2" column="0">
-       <widget class="QCheckBox" name="dlssnr">
-        <property name="text">
-         <string>DLSS-NR (Experimental)</string>
-        </property>
-       </widget>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="QGroupBox" name="dlssnrGroup">
+     <property name="title">
+      <string>DLSS-NR (Experimental)</string>
+     </property>
+     <layout class="QVBoxLayout" name="dlssnrGroupLayout">
+      <item>
+       <layout class="QHBoxLayout" name="dlssnrEnableLayout">
+        <item>
+         <widget class="QCheckBox" name="dlssnr">
+          <property name="text">
+           <string>Enable DLSS-NR</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QCheckBox" name="dlssnrHistory">
+          <property name="text">
+           <string>Use Frame History</string>
+          </property>
+         </widget>
+        </item>
+       </layout>
       </item>
-      <item row="2" column="1">
+      <item>
        <layout class="QHBoxLayout" name="dlssnrLayout">
+        <item>
+         <widget class="QLabel" name="dlssnrProfileLabel">
+          <property name="text">
+           <string>Profile:</string>
+          </property>
+          <property name="buddy">
+           <cstring>dlssnrProfile</cstring>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QComboBox" name="dlssnrProfile">
+          <item>
+           <property name="text">
+            <string>Standard</string>
+           </property>
+          </item>
+          <item>
+           <property name="text">
+            <string>Natural</string>
+           </property>
+          </item>
+          <item>
+           <property name="text">
+            <string>Cinematic</string>
+           </property>
+          </item>
+          <item>
+           <property name="text">
+            <string>Neutral</string>
+           </property>
+          </item>
+          <item>
+           <property name="text">
+            <string>Vendor</string>
+           </property>
+          </item>
+         </widget>
+        </item>
         <item>
          <widget class="QLabel" name="dlssnrIntensityLabel">
           <property name="text">
@@ -302,6 +361,308 @@
           </property>
           <property name="value">
            <number>448</number>
+          </property>
+         </widget>
+        </item>
+       </layout>
+      </item>
+      <item>
+       <layout class="QGridLayout" name="dlssnrControlsLayout">
+        <item row="0" column="0">
+         <widget class="QLabel" name="dlssnrStyleIndexLabel">
+          <property name="text">
+           <string>Style Index:</string>
+          </property>
+          <property name="buddy">
+           <cstring>dlssnrStyleIndex</cstring>
+          </property>
+         </widget>
+        </item>
+        <item row="0" column="1">
+         <widget class="QSpinBox" name="dlssnrStyleIndex">
+          <property name="specialValueText">
+           <string>Profile</string>
+          </property>
+          <property name="minimum">
+           <number>-1</number>
+          </property>
+          <property name="maximum">
+           <number>127</number>
+          </property>
+          <property name="value">
+           <number>-1</number>
+          </property>
+         </widget>
+        </item>
+        <item row="0" column="2">
+         <widget class="QLabel" name="dlssnrLocalToneLabel">
+          <property name="text">
+           <string>Local Tone:</string>
+          </property>
+          <property name="buddy">
+           <cstring>dlssnrLocalTone</cstring>
+          </property>
+         </widget>
+        </item>
+        <item row="0" column="3">
+         <widget class="QDoubleSpinBox" name="dlssnrLocalTone">
+          <property name="specialValueText">
+           <string>Profile</string>
+          </property>
+          <property name="decimals">
+           <number>2</number>
+          </property>
+          <property name="minimum">
+           <double>-0.05</double>
+          </property>
+          <property name="maximum">
+           <double>4.0</double>
+          </property>
+          <property name="singleStep">
+           <double>0.05</double>
+          </property>
+          <property name="value">
+           <double>-0.05</double>
+          </property>
+         </widget>
+        </item>
+        <item row="1" column="0">
+         <widget class="QLabel" name="dlssnrLocalStructureLabel">
+          <property name="text">
+           <string>Local Structure:</string>
+          </property>
+          <property name="buddy">
+           <cstring>dlssnrLocalStructure</cstring>
+          </property>
+         </widget>
+        </item>
+        <item row="1" column="1">
+         <widget class="QDoubleSpinBox" name="dlssnrLocalStructure">
+          <property name="specialValueText">
+           <string>Profile</string>
+          </property>
+          <property name="decimals">
+           <number>2</number>
+          </property>
+          <property name="minimum">
+           <double>-0.05</double>
+          </property>
+          <property name="maximum">
+           <double>4.0</double>
+          </property>
+          <property name="singleStep">
+           <double>0.05</double>
+          </property>
+          <property name="value">
+           <double>-0.05</double>
+          </property>
+         </widget>
+        </item>
+        <item row="1" column="2">
+         <widget class="QLabel" name="dlssnrSkinStructureLabel">
+          <property name="text">
+           <string>Skin Structure:</string>
+          </property>
+          <property name="buddy">
+           <cstring>dlssnrSkinStructure</cstring>
+          </property>
+         </widget>
+        </item>
+        <item row="1" column="3">
+         <widget class="QDoubleSpinBox" name="dlssnrSkinStructure">
+          <property name="specialValueText">
+           <string>Off</string>
+          </property>
+          <property name="decimals">
+           <number>2</number>
+          </property>
+          <property name="minimum">
+           <double>-0.05</double>
+          </property>
+          <property name="maximum">
+           <double>4.0</double>
+          </property>
+          <property name="singleStep">
+           <double>0.05</double>
+          </property>
+          <property name="value">
+           <double>-0.05</double>
+          </property>
+         </widget>
+        </item>
+        <item row="2" column="0">
+         <widget class="QLabel" name="dlssnrAutoMaskLabel">
+          <property name="text">
+           <string>Automatic Mask:</string>
+          </property>
+          <property name="buddy">
+           <cstring>dlssnrAutoMask</cstring>
+          </property>
+         </widget>
+        </item>
+        <item row="2" column="1">
+         <widget class="QDoubleSpinBox" name="dlssnrAutoMask">
+          <property name="specialValueText">
+           <string>Off</string>
+          </property>
+          <property name="decimals">
+           <number>2</number>
+          </property>
+          <property name="minimum">
+           <double>-0.05</double>
+          </property>
+          <property name="maximum">
+           <double>4.0</double>
+          </property>
+          <property name="singleStep">
+           <double>0.05</double>
+          </property>
+          <property name="value">
+           <double>-0.05</double>
+          </property>
+         </widget>
+        </item>
+        <item row="2" column="2">
+         <widget class="QLabel" name="dlssnrFrameIndexLabel">
+          <property name="text">
+           <string>Frame Index:</string>
+          </property>
+          <property name="buddy">
+           <cstring>dlssnrFrameIndex</cstring>
+          </property>
+         </widget>
+        </item>
+        <item row="2" column="3">
+         <widget class="QSpinBox" name="dlssnrFrameIndex">
+          <property name="minimum">
+           <number>0</number>
+          </property>
+          <property name="maximum">
+           <number>1000000</number>
+          </property>
+          <property name="value">
+           <number>0</number>
+          </property>
+         </widget>
+        </item>
+        <item row="3" column="0">
+         <widget class="QLabel" name="dlssnrDetailStrengthLabel">
+          <property name="text">
+           <string>Detail Strength:</string>
+          </property>
+          <property name="buddy">
+           <cstring>dlssnrDetailStrength</cstring>
+          </property>
+         </widget>
+        </item>
+        <item row="3" column="1">
+         <widget class="QDoubleSpinBox" name="dlssnrDetailStrength">
+          <property name="decimals">
+           <number>2</number>
+          </property>
+          <property name="minimum">
+           <double>0.0</double>
+          </property>
+          <property name="maximum">
+           <double>4.0</double>
+          </property>
+          <property name="singleStep">
+           <double>0.05</double>
+          </property>
+          <property name="value">
+           <double>1.0</double>
+          </property>
+         </widget>
+        </item>
+        <item row="3" column="2">
+         <widget class="QLabel" name="dlssnrColourStrengthLabel">
+          <property name="text">
+           <string>Colour Strength:</string>
+          </property>
+          <property name="buddy">
+           <cstring>dlssnrColourStrength</cstring>
+          </property>
+         </widget>
+        </item>
+        <item row="3" column="3">
+         <widget class="QDoubleSpinBox" name="dlssnrColourStrength">
+          <property name="decimals">
+           <number>2</number>
+          </property>
+          <property name="minimum">
+           <double>0.0</double>
+          </property>
+          <property name="maximum">
+           <double>4.0</double>
+          </property>
+          <property name="singleStep">
+           <double>0.05</double>
+          </property>
+          <property name="value">
+           <double>1.0</double>
+          </property>
+         </widget>
+        </item>
+        <item row="4" column="0">
+         <widget class="QLabel" name="dlssnrDetailRadiusLabel">
+          <property name="text">
+           <string>Detail Radius:</string>
+          </property>
+          <property name="buddy">
+           <cstring>dlssnrDetailRadius</cstring>
+          </property>
+         </widget>
+        </item>
+        <item row="4" column="1">
+         <widget class="QDoubleSpinBox" name="dlssnrDetailRadius">
+          <property name="suffix">
+           <string>px</string>
+          </property>
+          <property name="decimals">
+           <number>1</number>
+          </property>
+          <property name="minimum">
+           <double>0.1</double>
+          </property>
+          <property name="maximum">
+           <double>32.0</double>
+          </property>
+          <property name="singleStep">
+           <double>0.5</double>
+          </property>
+          <property name="value">
+           <double>4.0</double>
+          </property>
+         </widget>
+        </item>
+       </layout>
+      </item>
+      <item>
+       <layout class="QHBoxLayout" name="dlssnrControlMaskLayout">
+        <item>
+         <widget class="QLabel" name="dlssnrControlMaskLabel">
+          <property name="text">
+           <string>Control Mask:</string>
+          </property>
+          <property name="buddy">
+           <cstring>dlssnrControlMask</cstring>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QLineEdit" name="dlssnrControlMask"/>
+        </item>
+        <item>
+         <widget class="QPushButton" name="dlssnrControlMaskBrowse">
+          <property name="text">
+           <string>Browse...</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QPushButton" name="dlssnrControlMaskClear">
+          <property name="text">
+           <string>Clear</string>
           </property>
          </widget>
         </item>

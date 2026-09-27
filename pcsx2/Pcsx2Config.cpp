@@ -712,6 +712,7 @@ Pcsx2Config::GSOptions::GSOptions()
 	bitsets[1] = 0;
 
 	PCRTCAntiBlur = true;
+	DLSSNR_History = true;
 	DisableInterlaceOffset = false;
 	PCRTCOffsets = false;
 	PCRTCOverscan = false;
@@ -870,6 +871,16 @@ bool Pcsx2Config::GSOptions::OptionsAreEqual(const GSOptions& right) const
 		OpEqu(ShadeBoost_Saturation) &&
 		OpEqu(ShadeBoost_Gamma) &&
 		OpEqu(DLSSNR_Intensity) &&
+		OpEqu(DLSSNR_Profile) &&
+		OpEqu(DLSSNR_StyleIndex) &&
+		OpEqu(DLSSNR_LocalTone) &&
+		OpEqu(DLSSNR_LocalStructure) &&
+		OpEqu(DLSSNR_SkinStructure) &&
+		OpEqu(DLSSNR_AutoMask) &&
+		OpEqu(DLSSNR_DetailStrength) &&
+		OpEqu(DLSSNR_ColourStrength) &&
+		OpEqu(DLSSNR_DetailRadius) &&
+		OpEqu(DLSSNR_FrameIndex) &&
 		OpEqu(DLSSNR_MaxHeight) &&
 		OpEqu(PNGCompressionLevel) &&
 		OpEqu(SaveDrawStart) &&
@@ -902,6 +913,7 @@ bool Pcsx2Config::GSOptions::OptionsAreEqual(const GSOptions& right) const
 		OpEqu(Adapter) &&
 
 		OpEqu(HWDumpDirectory) &&
+		OpEqu(DLSSNR_ControlMask) &&
 		OpEqu(SWDumpDirectory));
 }
 
@@ -1017,6 +1029,7 @@ void Pcsx2Config::GSOptions::LoadSave(SettingsWrapper& wrap)
 	SettingsWrapBitBoolEx(FXAA, "fxaa");
 	SettingsWrapBitBool(ShadeBoost);
 	SettingsWrapBitBool(DLSSNR);
+	SettingsWrapBitBool(DLSSNR_History);
 	SettingsWrapBitBoolEx(DumpGSData, "DumpGSData");
 	SettingsWrapBitBoolEx(SaveRT, "SaveRT");
 	SettingsWrapBitBoolEx(SaveFrame, "SaveFrame");
@@ -1096,6 +1109,17 @@ void Pcsx2Config::GSOptions::LoadSave(SettingsWrapper& wrap)
 	SettingsWrapBitfield(ShadeBoost_Saturation);
 	SettingsWrapBitfield(ShadeBoost_Gamma);
 	SettingsWrapBitfield(DLSSNR_Intensity);
+	SettingsWrapBitfield(DLSSNR_Profile);
+	SettingsWrapBitfield(DLSSNR_StyleIndex);
+	SettingsWrapEntry(DLSSNR_LocalTone);
+	SettingsWrapEntry(DLSSNR_LocalStructure);
+	SettingsWrapEntry(DLSSNR_SkinStructure);
+	SettingsWrapEntry(DLSSNR_AutoMask);
+	SettingsWrapEntry(DLSSNR_DetailStrength);
+	SettingsWrapEntry(DLSSNR_ColourStrength);
+	SettingsWrapEntry(DLSSNR_DetailRadius);
+	SettingsWrapEntry(DLSSNR_FrameIndex);
+	SettingsWrapEntry(DLSSNR_ControlMask);
 	SettingsWrapBitfield(DLSSNR_MaxHeight);
 	SettingsWrapBitfield(ExclusiveFullscreenControl);
 	SettingsWrapBitfieldEx(PNGCompressionLevel, "png_compression_level");

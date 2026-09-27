@@ -5,6 +5,8 @@
 #include "QtUtils.h"
 #include "SettingWidgetBinder.h"
 #include "SettingsWindow.h"
+#include <QtCore/QDir>
+#include <QtWidgets/QFileDialog>
 #include <QtWidgets/QMessageBox>
 
 #include "pcsx2/Host.h"
@@ -214,13 +216,28 @@ GraphicsSettingsWidget::GraphicsSettingsWidget(SettingsWindow* settings_dialog, 
 	SettingWidgetBinder::BindWidgetToBoolSetting(sif, m_post.shadeBoost, "EmuCore/GS", "ShadeBoost", false);
 	SettingWidgetBinder::BindWidgetToBoolSetting(sif, m_post.dlssnr, "EmuCore/GS", "DLSSNR", false);
 	SettingWidgetBinder::BindWidgetToIntSetting(sif, m_post.dlssnrIntensity, "EmuCore/GS", "DLSSNR_Intensity", 100);
+	SettingWidgetBinder::BindWidgetToIntSetting(sif, m_post.dlssnrProfile, "EmuCore/GS", "DLSSNR_Profile", 0);
 	SettingWidgetBinder::BindWidgetToIntSetting(sif, m_post.dlssnrMaxHeight, "EmuCore/GS", "DLSSNR_MaxHeight", 448);
+	SettingWidgetBinder::BindWidgetToBoolSetting(sif, m_post.dlssnrHistory, "EmuCore/GS", "DLSSNR_History", true);
+	SettingWidgetBinder::BindWidgetToIntSetting(sif, m_post.dlssnrStyleIndex, "EmuCore/GS", "DLSSNR_StyleIndex", -1);
+	SettingWidgetBinder::BindWidgetToFloatSetting(sif, m_post.dlssnrLocalTone, "EmuCore/GS", "DLSSNR_LocalTone", -1.0f);
+	SettingWidgetBinder::BindWidgetToFloatSetting(sif, m_post.dlssnrLocalStructure, "EmuCore/GS", "DLSSNR_LocalStructure", -1.0f);
+	SettingWidgetBinder::BindWidgetToFloatSetting(sif, m_post.dlssnrSkinStructure, "EmuCore/GS", "DLSSNR_SkinStructure", -1.0f);
+	SettingWidgetBinder::BindWidgetToFloatSetting(sif, m_post.dlssnrAutoMask, "EmuCore/GS", "DLSSNR_AutoMask", -1.0f);
+	SettingWidgetBinder::BindWidgetToFloatSetting(sif, m_post.dlssnrDetailStrength, "EmuCore/GS", "DLSSNR_DetailStrength", 1.0f);
+	SettingWidgetBinder::BindWidgetToFloatSetting(sif, m_post.dlssnrColourStrength, "EmuCore/GS", "DLSSNR_ColourStrength", 1.0f);
+	SettingWidgetBinder::BindWidgetToFloatSetting(sif, m_post.dlssnrDetailRadius, "EmuCore/GS", "DLSSNR_DetailRadius", 4.0f);
+	SettingWidgetBinder::BindWidgetToIntSetting(sif, m_post.dlssnrFrameIndex, "EmuCore/GS", "DLSSNR_FrameIndex", 0);
+	SettingWidgetBinder::BindWidgetToStringSetting(sif, m_post.dlssnrControlMask, "EmuCore/GS", "DLSSNR_ControlMask");
+	connect(m_post.dlssnrControlMaskBrowse, &QPushButton::clicked, this, [this]() {
+		const QString path = QFileDialog::getOpenFileName(QtUtils::GetRootWidget(this), tr("Select Control Mask"),
+			m_post.dlssnrControlMask->text(), tr("PNG Images (*.png)"));
+		if (!path.isEmpty())
+			m_post.dlssnrControlMask->setText(QDir::toNativeSeparators(path));
+	});
+	connect(m_post.dlssnrControlMaskClear, &QPushButton::clicked, m_post.dlssnrControlMask, &QLineEdit::clear);
 	if (!GSDLSSNR::IsAvailable())
-	{
-		m_post.dlssnr->setEnabled(false);
-		m_post.dlssnrIntensity->setEnabled(false);
-		m_post.dlssnrMaxHeight->setEnabled(false);
-	}
+		m_post.dlssnrGroup->setEnabled(false);
 	SettingWidgetBinder::BindWidgetToIntSetting(sif, m_post.shadeBoostBrightness, "EmuCore/GS", "ShadeBoost_Brightness", Pcsx2Config::GSOptions::DEFAULT_SHADEBOOST_BRIGHTNESS);
 	SettingWidgetBinder::BindWidgetToIntSetting(sif, m_post.shadeBoostContrast, "EmuCore/GS", "ShadeBoost_Contrast", Pcsx2Config::GSOptions::DEFAULT_SHADEBOOST_CONTRAST);
 	SettingWidgetBinder::BindWidgetToIntSetting(sif, m_post.shadeBoostGamma, "EmuCore/GS", "ShadeBoost_Gamma", Pcsx2Config::GSOptions::DEFAULT_SHADEBOOST_GAMMA);
@@ -726,6 +743,34 @@ GraphicsSettingsWidget::GraphicsSettingsWidget(SettingsWindow* settings_dialog, 
 			   "Only available in builds made with USE_DLSSNR, which need model weights you supply yourself."));
 		dialog()->registerWidgetHelp(m_post.dlssnrIntensity, tr("DLSS-NR Intensity"), tr("100%"),
 			tr("Blend of the model's picture against the game's. Above 100% extrapolates."));
+		dialog()->registerWidgetHelp(m_post.dlssnrProfile, tr("DLSS-NR Profile"), tr("Standard"),
+			tr("The style, local tone and local structure the model is conditioned on. Neutral turns local tone and "
+			   "structure off, Vendor raises structure."));
+		dialog()->registerWidgetHelp(m_post.dlssnrHistory, tr("Use Frame History"), tr("Checked"),
+			tr("Feeds the previous filtered frame back into the model, for steadier motion. Unchecked, every frame is "
+			   "filtered on its own exactly as the nr_frame command filters a picture, and the filter runs faster."));
+		dialog()->registerWidgetHelp(m_post.dlssnrStyleIndex, tr("Style Index"), tr("Profile"),
+			tr("The vendor style index the model is conditioned on (nr_frame --style-index). Profile keeps the profile's."));
+		dialog()->registerWidgetHelp(m_post.dlssnrLocalTone, tr("Local Tone"), tr("Profile"),
+			tr("Local tone the model is conditioned on (nr_frame --local-tone). Profile keeps the profile's."));
+		dialog()->registerWidgetHelp(m_post.dlssnrLocalStructure, tr("Local Structure"), tr("Profile"),
+			tr("Local structure the model is conditioned on (nr_frame --local-structure). Profile keeps the profile's."));
+		dialog()->registerWidgetHelp(m_post.dlssnrSkinStructure, tr("Skin Structure"), tr("Off"),
+			tr("Structure on skin, through the automatic mask (nr_frame --skin-structure). Setting this or Automatic Mask "
+			   "turns the automatic mask on."));
+		dialog()->registerWidgetHelp(m_post.dlssnrAutoMask, tr("Automatic Mask"), tr("Off"),
+			tr("Structure through the automatic mask outside skin (nr_frame --auto-mask)."));
+		dialog()->registerWidgetHelp(m_post.dlssnrDetailStrength, tr("Detail Strength"), tr("1.00"),
+			tr("High-frequency weight of the model's change (nr_frame --detail-strength)."));
+		dialog()->registerWidgetHelp(m_post.dlssnrColourStrength, tr("Colour Strength"), tr("1.00"),
+			tr("Low-frequency weight of the model's change (nr_frame --colour-strength)."));
+		dialog()->registerWidgetHelp(m_post.dlssnrDetailRadius, tr("Detail Radius"), tr("4.0px"),
+			tr("Radius of the split between detail and colour (nr_frame --detail-radius)."));
+		dialog()->registerWidgetHelp(m_post.dlssnrFrameIndex, tr("Frame Index"), tr("0"),
+			tr("Seeds the model's noise channels (nr_frame --frame-index)."));
+		dialog()->registerWidgetHelp(m_post.dlssnrControlMask, tr("Control Mask"), tr("None"),
+			tr("A PNG control mask (nr_frame --control-mask): red scales the blend, green the tone and blue the "
+			   "structure. It is resized to the filtered frame."));
 		dialog()->registerWidgetHelp(m_post.dlssnrMaxHeight, tr("DLSS-NR Maximum Height"), tr("448px"),
 			tr("Frames taller than this are scaled down before the model runs, and back up after. Lower is faster."));
 		dialog()->registerWidgetHelp(m_post.shadeBoost, tr("Shade Boost"), tr("Unchecked"),

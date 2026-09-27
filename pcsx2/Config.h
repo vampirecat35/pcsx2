@@ -816,6 +816,7 @@ struct Pcsx2Config
 					FXAA : 1,
 					ShadeBoost : 1,
 					DLSSNR : 1,
+					DLSSNR_History : 1,
 					DumpGSData : 1,
 					SaveRT : 1,
 					SaveFrame : 1,
@@ -906,6 +907,18 @@ struct Pcsx2Config
 		u8 ShadeBoost_Saturation = DEFAULT_SHADEBOOST_SATURATION;
 		u8 ShadeBoost_Gamma = DEFAULT_SHADEBOOST_GAMMA;
 		u8 DLSSNR_Intensity = 100;
+		u8 DLSSNR_Profile = 0; // standard, natural, cinematic, neutral, vendor
+		// nr_frame's overrides, applied over the profile. A negative value keeps the profile's
+		// (style, tone, structure) or leaves the automatic mask off (skin, auto mask).
+		s16 DLSSNR_StyleIndex = -1;
+		float DLSSNR_LocalTone = -1.0f;
+		float DLSSNR_LocalStructure = -1.0f;
+		float DLSSNR_SkinStructure = -1.0f;
+		float DLSSNR_AutoMask = -1.0f;
+		float DLSSNR_DetailStrength = 1.0f;
+		float DLSSNR_ColourStrength = 1.0f;
+		float DLSSNR_DetailRadius = 4.0f;
+		s32 DLSSNR_FrameIndex = 0;
 		u16 DLSSNR_MaxHeight = 448;
 		u8 PNGCompressionLevel = 1;
 
@@ -942,6 +955,7 @@ struct Pcsx2Config
 		std::string Adapter;
 		std::string HWDumpDirectory;
 		std::string SWDumpDirectory;
+		std::string DLSSNR_ControlMask; // PNG, resized to the filtered frame
 
 		GSOptions();
 

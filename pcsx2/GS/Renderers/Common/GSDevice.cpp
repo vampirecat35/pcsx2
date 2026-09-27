@@ -1112,9 +1112,9 @@ void GSDevice::FXAA()
 
 void GSDevice::DLSSNR()
 {
-	// The model runs on the GSDLSSNR worker thread. Each present, at most one of these happens:
-	// collect a finished result, hand last present's readback to the worker (the copy has had a
-	// frame to land, so mapping it rarely waits), or start a readback when the worker is idle.
+	// The model runs on the GSDLSSNR pipeline threads. Each present, at most one of these happens:
+	// collect a finished result, hand last present's readback to the pipeline (the copy has had a
+	// frame to land, so mapping it rarely waits), or start a readback when the pipeline has room.
 	// The display shows the newest filtered frame, so it trails the game by the filter's latency.
 	// Needs proper testing.
 	if (!m_current || !GSDLSSNR::IsAvailable())
@@ -1162,8 +1162,21 @@ void GSDevice::DLSSNR()
 		m_dlssnr_readback.resize(static_cast<size_t>(dl_width) * 4 * dl_height);
 		if (m_dlssnr_download->ReadTexels(rc, m_dlssnr_readback.data(), dl_width * 4))
 		{
-			GSDLSSNR::Submit(m_dlssnr_readback, dl_width, dl_height,
-				static_cast<float>(GSConfig.DLSSNR_Intensity) * (1.0f / 100.0f));
+			GSDLSSNR::Settings settings;
+			settings.intensity = static_cast<float>(GSConfig.DLSSNR_Intensity) * (1.0f / 100.0f);
+			settings.profile = GSConfig.DLSSNR_Profile;
+			settings.style_index = GSConfig.DLSSNR_StyleIndex;
+			settings.local_tone = GSConfig.DLSSNR_LocalTone;
+			settings.local_structure = GSConfig.DLSSNR_LocalStructure;
+			settings.skin_structure = GSConfig.DLSSNR_SkinStructure;
+			settings.auto_mask = GSConfig.DLSSNR_AutoMask;
+			settings.detail_strength = GSConfig.DLSSNR_DetailStrength;
+			settings.colour_strength = GSConfig.DLSSNR_ColourStrength;
+			settings.detail_radius = GSConfig.DLSSNR_DetailRadius;
+			settings.frame_index = GSConfig.DLSSNR_FrameIndex;
+			settings.control_mask = GSConfig.DLSSNR_ControlMask;
+			settings.history = GSConfig.DLSSNR_History;
+			GSDLSSNR::Submit(m_dlssnr_readback, dl_width, dl_height, settings);
 		}
 	}
 	else if (!GSDLSSNR::IsBusy())
