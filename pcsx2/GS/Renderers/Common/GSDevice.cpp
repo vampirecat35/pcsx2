@@ -462,6 +462,7 @@ void GSDevice::Destroy()
 {
 	ClearCurrent();
 	PurgePool();
+	GSDLSSNR::Shutdown();
 }
 
 bool GSDevice::AcquireWindow(bool recreate_window)
@@ -1009,6 +1010,7 @@ void GSDevice::ClearCurrent()
 	delete m_dlssnr_upload;
 	delete m_dlssnr_output;
 	m_dlssnr_download.reset();
+	m_dlssnr_copy_pending = false;
 
 	m_merge = nullptr;
 	m_weavebob = nullptr;
@@ -1110,8 +1112,11 @@ void GSDevice::FXAA()
 
 void GSDevice::DLSSNR()
 {
-	// Reads the frame back, runs it through the model on the CPU-visible path, and uploads the
-	// result. Synchronous, so it stalls the GPU every frame. Needs proper testing.
+	// The model runs on the GSDLSSNR worker thread. Each present, at most one of these happens:
+	// collect a finished result, hand last present's readback to the worker (the copy has had a
+	// frame to land, so mapping it rarely waits), or start a readback when the worker is idle.
+	// The display shows the newest filtered frame, so it trails the game by the filter's latency.
+	// Needs proper testing.
 	if (!m_current || !GSDLSSNR::IsAvailable())
 		return;
 
@@ -1128,51 +1133,87 @@ void GSDevice::DLSSNR()
 		filter_width = std::max(1, (width * max_height + height / 2) / height);
 	}
 
-	GSTexture* source = m_current;
-	if (filter_width != width || filter_height != height)
+	u32 result_width, result_height;
+	if (GSDLSSNR::Receive(m_dlssnr_pixels, &result_width, &result_height))
 	{
-		if (!ResizeRenderTarget(&m_dlssnr_small, filter_width, filter_height, false, false))
-			return;
-		StretchRect(m_current, m_dlssnr_small, ShaderConvert::COPY, Filter::Biln);
-		source = m_dlssnr_small;
+		if (!m_dlssnr_upload || m_dlssnr_upload->GetWidth() != static_cast<int>(result_width) ||
+			m_dlssnr_upload->GetHeight() != static_cast<int>(result_height))
+		{
+			delete m_dlssnr_upload;
+			m_dlssnr_upload = CreateTexture(result_width, result_height, 1, GSTexture::Format::Color);
+		}
+		if (m_dlssnr_upload)
+		{
+			const GSVector4i rc(0, 0, result_width, result_height);
+			if (!m_dlssnr_upload->Update(rc, m_dlssnr_pixels.data(), static_cast<int>(result_width * 4)))
+			{
+				delete m_dlssnr_upload;
+				m_dlssnr_upload = nullptr;
+			}
+		}
 	}
 
-	if (!m_dlssnr_download || m_dlssnr_download->GetWidth() != static_cast<u32>(filter_width) ||
-		m_dlssnr_download->GetHeight() != static_cast<u32>(filter_height))
+	if (m_dlssnr_copy_pending)
 	{
-		m_dlssnr_download = CreateDownloadTexture(filter_width, filter_height, GSTexture::Format::Color);
-		if (!m_dlssnr_download)
-			return;
-		GSDLSSNR::ResetHistory();
+		m_dlssnr_copy_pending = false;
+		const u32 dl_width = m_dlssnr_download->GetWidth();
+		const u32 dl_height = m_dlssnr_download->GetHeight();
+		const GSVector4i rc(0, 0, dl_width, dl_height);
+		m_dlssnr_readback.resize(static_cast<size_t>(dl_width) * 4 * dl_height);
+		if (m_dlssnr_download->ReadTexels(rc, m_dlssnr_readback.data(), dl_width * 4))
+		{
+			GSDLSSNR::Submit(m_dlssnr_readback, dl_width, dl_height,
+				static_cast<float>(GSConfig.DLSSNR_Intensity) * (1.0f / 100.0f));
+		}
+	}
+	else if (!GSDLSSNR::IsBusy())
+	{
+		GSTexture* source = m_current;
+		if (filter_width != width || filter_height != height)
+		{
+			if (ResizeRenderTarget(&m_dlssnr_small, filter_width, filter_height, false, false))
+			{
+				StretchRect(m_current, m_dlssnr_small, ShaderConvert::COPY, Filter::Biln);
+				source = m_dlssnr_small;
+			}
+			else
+			{
+				source = nullptr;
+			}
+		}
+
+		if (source && (!m_dlssnr_download || m_dlssnr_download->GetWidth() != static_cast<u32>(filter_width) ||
+						  m_dlssnr_download->GetHeight() != static_cast<u32>(filter_height)))
+		{
+			m_dlssnr_download = CreateDownloadTexture(filter_width, filter_height, GSTexture::Format::Color);
+			GSDLSSNR::ResetHistory();
+		}
+
+		if (source && m_dlssnr_download)
+		{
+			const GSVector4i rc(0, 0, filter_width, filter_height);
+			m_dlssnr_download->CopyFromTexture(rc, source, rc, 0, true);
+			m_dlssnr_copy_pending = true;
+		}
 	}
 
-	const GSVector4i rc(0, 0, filter_width, filter_height);
-	const u32 stride = static_cast<u32>(filter_width) * 4;
-	m_dlssnr_pixels.resize(static_cast<size_t>(stride) * filter_height);
-	m_dlssnr_download->CopyFromTexture(rc, source, rc, 0, true);
-	if (!m_dlssnr_download->ReadTexels(rc, m_dlssnr_pixels.data(), stride))
-		return;
-
-	if (!GSDLSSNR::Process(m_dlssnr_pixels.data(), filter_width, filter_height, stride,
-			static_cast<float>(GSConfig.DLSSNR_Intensity) * (1.0f / 100.0f)))
-	{
-		return;
-	}
-
-	if (!m_dlssnr_upload || m_dlssnr_upload->GetWidth() != filter_width || m_dlssnr_upload->GetHeight() != filter_height)
-	{
-		delete m_dlssnr_upload;
-		m_dlssnr_upload = CreateTexture(filter_width, filter_height, 1, GSTexture::Format::Color);
-		if (!m_dlssnr_upload)
-			return;
-	}
-	if (!m_dlssnr_upload->Update(rc, m_dlssnr_pixels.data(), static_cast<int>(stride)))
-		return;
-
-	if (!ResizeRenderTarget(&m_dlssnr_output, width, height, false, false))
+	// Nothing filtered yet (just enabled, or the model failed): show the frame as it is.
+	if (!m_dlssnr_upload || !ResizeRenderTarget(&m_dlssnr_output, width, height, false, false))
 		return;
 	StretchRect(m_dlssnr_upload, m_dlssnr_output, ShaderConvert::COPY, Filter::Biln);
 	m_current = m_dlssnr_output;
+}
+
+void GSDevice::ResetDLSSNR()
+{
+	// Drops the last filtered frame, so it isn't shown again when the filter is re-enabled.
+	if (!m_dlssnr_upload && !m_dlssnr_copy_pending)
+		return;
+
+	delete m_dlssnr_upload;
+	m_dlssnr_upload = nullptr;
+	m_dlssnr_copy_pending = false;
+	GSDLSSNR::ResetHistory();
 }
 
 void GSDevice::ShadeBoost()

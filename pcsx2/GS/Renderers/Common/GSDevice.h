@@ -1498,12 +1498,14 @@ protected:
 	GSTexture* m_current = nullptr;
 	GSTexture* m_cas = nullptr;
 
-	// DLSS-NR filter: the downscaled source, the filtered upload and the result.
+	// DLSS-NR filter: the downscaled source, the newest filtered upload and the result.
 	GSTexture* m_dlssnr_small = nullptr;
 	GSTexture* m_dlssnr_upload = nullptr;
 	GSTexture* m_dlssnr_output = nullptr;
 	std::unique_ptr<GSDownloadTexture> m_dlssnr_download;
-	std::vector<u8> m_dlssnr_pixels;
+	std::vector<u8> m_dlssnr_pixels; // result from the worker
+	std::vector<u8> m_dlssnr_readback; // frame going to the worker
+	bool m_dlssnr_copy_pending = false; // m_dlssnr_download holds a copy not yet read
 	GSTexture* m_colclip_rt = nullptr; ///< Temp hw colclip texture
 	GSTexture* m_ds_as_rt = nullptr; ///< Depth as color
 
@@ -1726,6 +1728,7 @@ public:
 	void FXAA();
 	void ShadeBoost();
 	void DLSSNR();
+	void ResetDLSSNR();
 	void Resize(int width, int height);
 
 	void CAS(GSTexture*& tex, GSVector4i& src_rect, GSVector4& src_uv, const GSVector4& draw_rect, bool sharpen_only);

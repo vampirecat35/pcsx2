@@ -9,15 +9,20 @@
 
 #include "nr_frame.h"
 
+#include "common/Threading.h"
+
+#include <atomic>
 #include <cmath>
-#include <vector>
+#include <condition_variable>
+#include <mutex>
+#include <thread>
 
 namespace
 {
+	// Only touched by the worker thread, which owns the model.
 	struct DLSSNRState
 	{
 		nr_frame* frame = nullptr;
-		bool open_failed = false;
 		bool error_reported = false;
 		int frame_index = 0;
 
@@ -31,7 +36,32 @@ namespace
 		std::vector<float> previous; // previous input
 	};
 
+	// Shared between the GS thread and the worker, guarded by mutex.
+	struct DLSSNRWorker
+	{
+		std::thread thread;
+		std::mutex mutex;
+		std::condition_variable cv;
+		bool quit = false;
+
+		bool job_pending = false;
+		std::vector<u8> job;
+		u32 job_width = 0;
+		u32 job_height = 0;
+		float job_intensity = 1.0f;
+
+		bool result_ready = false;
+		std::vector<u8> result;
+		u32 result_width = 0;
+		u32 result_height = 0;
+
+		std::atomic_bool busy{false};
+		std::atomic_bool failed{false};
+		std::atomic_bool reset_history{false};
+	};
+
 	static DLSSNRState s_state;
+	static DLSSNRWorker s_worker;
 } // namespace
 
 bool GSDLSSNR::IsAvailable()
@@ -43,15 +73,12 @@ static bool OpenFrame()
 {
 	if (s_state.frame)
 		return true;
-	if (s_state.open_failed)
-		return false;
 
 	// NULL: the weights compiled into libdlssnr.
 	s_state.frame = nr_frame_open(nullptr);
 	if (!s_state.frame)
 	{
 		Console.Error("DLSS-NR: nr_frame_open() failed: %s", nr_frame_error());
-		s_state.open_failed = true;
 		return false;
 	}
 
@@ -60,12 +87,23 @@ static bool OpenFrame()
 	return true;
 }
 
-bool GSDLSSNR::Process(u8* rgba, u32 width, u32 height, u32 stride, float intensity)
+static void CloseFrame()
 {
-	if (width == 0 || height == 0 || !OpenFrame())
-		return false;
+	if (s_state.frame)
+	{
+		nr_frame_close(s_state.frame);
+		nr_frame_shutdown();
+		s_state.frame = nullptr;
+	}
+	s_state.have_history = false;
+	s_state.error_reported = false;
+}
 
+// Filters an RGBA8 image (width * 4 stride) in place, on the worker thread.
+static bool ProcessFrame(u8* rgba, u32 width, u32 height, float intensity)
+{
 	const size_t pixels = static_cast<size_t>(width) * height;
+	const u32 stride = width * 4;
 	if (width != s_state.width || height != s_state.height)
 	{
 		s_state.width = width;
@@ -133,21 +171,126 @@ bool GSDLSSNR::Process(u8* rgba, u32 width, u32 height, u32 stride, float intens
 	return true;
 }
 
+static void WorkerThread()
+{
+	Threading::SetNameOfCurrentThread("DLSS-NR");
+
+	// The model is opened and closed here, so libframe only ever sees this one thread.
+	if (!OpenFrame())
+	{
+		s_worker.failed.store(true, std::memory_order_release);
+		s_worker.busy.store(false, std::memory_order_release);
+		return;
+	}
+
+	std::vector<u8> pixels;
+	std::unique_lock lock(s_worker.mutex);
+	for (;;)
+	{
+		s_worker.cv.wait(lock, [] { return s_worker.quit || s_worker.job_pending; });
+		if (s_worker.quit)
+			break;
+
+		pixels.swap(s_worker.job);
+		const u32 width = s_worker.job_width;
+		const u32 height = s_worker.job_height;
+		const float intensity = s_worker.job_intensity;
+		s_worker.job_pending = false;
+		lock.unlock();
+
+		if (s_worker.reset_history.exchange(false, std::memory_order_acq_rel))
+			s_state.have_history = false;
+
+		const bool ok = ProcessFrame(pixels.data(), width, height, intensity);
+
+		lock.lock();
+		if (ok)
+		{
+			s_worker.result.swap(pixels);
+			s_worker.result_width = width;
+			s_worker.result_height = height;
+			s_worker.result_ready = true;
+		}
+		s_worker.busy.store(false, std::memory_order_release);
+	}
+	lock.unlock();
+
+	CloseFrame();
+}
+
+bool GSDLSSNR::IsBusy()
+{
+	return s_worker.busy.load(std::memory_order_acquire);
+}
+
+bool GSDLSSNR::Submit(std::vector<u8>& rgba, u32 width, u32 height, float intensity)
+{
+	if (width == 0 || height == 0 || s_worker.failed.load(std::memory_order_acquire) ||
+		s_worker.busy.load(std::memory_order_acquire))
+	{
+		return false;
+	}
+
+	{
+		std::unique_lock lock(s_worker.mutex);
+		s_worker.job.swap(rgba);
+		s_worker.job_width = width;
+		s_worker.job_height = height;
+		s_worker.job_intensity = intensity;
+		s_worker.job_pending = true;
+		s_worker.busy.store(true, std::memory_order_release);
+	}
+
+	if (!s_worker.thread.joinable())
+	{
+		s_worker.quit = false;
+		s_worker.thread = std::thread(WorkerThread);
+	}
+	else
+	{
+		s_worker.cv.notify_one();
+	}
+
+	return true;
+}
+
+bool GSDLSSNR::Receive(std::vector<u8>& rgba, u32* width, u32* height)
+{
+	std::unique_lock lock(s_worker.mutex);
+	if (!s_worker.result_ready)
+		return false;
+
+	rgba.swap(s_worker.result);
+	*width = s_worker.result_width;
+	*height = s_worker.result_height;
+	s_worker.result_ready = false;
+	return true;
+}
+
 void GSDLSSNR::ResetHistory()
 {
-	s_state.have_history = false;
+	s_worker.reset_history.store(true, std::memory_order_release);
 }
 
 void GSDLSSNR::Shutdown()
 {
-	if (s_state.frame)
+	if (s_worker.thread.joinable())
 	{
-		nr_frame_close(s_state.frame);
-		nr_frame_shutdown();
-		s_state.frame = nullptr;
+		{
+			std::unique_lock lock(s_worker.mutex);
+			s_worker.quit = true;
+		}
+		s_worker.cv.notify_one();
+		s_worker.thread.join();
 	}
-	s_state.have_history = false;
-	s_state.error_reported = false;
+
+	std::unique_lock lock(s_worker.mutex);
+	s_worker.quit = false;
+	s_worker.job_pending = false;
+	s_worker.result_ready = false;
+	s_worker.busy.store(false, std::memory_order_release);
+	s_worker.reset_history.store(false, std::memory_order_release);
+	// failed is kept: a model that couldn't open once won't open on the next device either.
 }
 
 #else
@@ -157,7 +300,17 @@ bool GSDLSSNR::IsAvailable()
 	return false;
 }
 
-bool GSDLSSNR::Process(u8* rgba, u32 width, u32 height, u32 stride, float intensity)
+bool GSDLSSNR::IsBusy()
+{
+	return false;
+}
+
+bool GSDLSSNR::Submit(std::vector<u8>& rgba, u32 width, u32 height, float intensity)
+{
+	return false;
+}
+
+bool GSDLSSNR::Receive(std::vector<u8>& rgba, u32* width, u32* height)
 {
 	return false;
 }
