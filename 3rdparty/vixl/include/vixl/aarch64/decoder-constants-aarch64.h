@@ -40,7 +40,7 @@ constexpr uint32_t str_to_two_bit_pattern(const char* x, size_t s, uint32_t a) {
   return str_to_two_bit_pattern(x + 1, s - 1, (a << 2) | r);
 }
 
-constexpr uint32_t operator"" _b(const char* x, size_t s) {
+constexpr uint32_t operator""_b(const char* x, size_t s) {
   return str_to_two_bit_pattern(x, s, DecodeNode::kEndOfPattern);
 }
 

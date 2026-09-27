@@ -1641,7 +1641,7 @@ static __fi void recClearIOP(u32 Addr, u32 Size)
 static void iopRecRecompile(const u32 startpc)
 {
 	u32 i;
-	u32 link_next_block = 0;
+	//u32 link_next_block = 0;
 
 	// When upgrading the IOP, there are two resets, the second of which is a 'fake' reset
 	// This second 'reset' involves UDNL calling SYSMEM and LOADCORE directly, resetting LOADCORE's modules
@@ -1719,7 +1719,7 @@ static void iopRecRecompile(const u32 startpc)
 		if (i != startpc && pblock->GetFnptr() != (uptr)iopJITCompile)
 		{
 			// The next instruction is already compiled, end here and link to it.
-			link_next_block = 1;
+			//link_next_block = 1;
 			s_nEndBlock = i;
 			break;
 		}
@@ -1804,7 +1804,7 @@ StartRecomp:
 
 	if (psxbranch)
 	{
-		pxAssert(!link_next_block);
+		//pxAssert(!link_next_block);
 	}
 	else
 	{

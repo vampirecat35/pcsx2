@@ -78,22 +78,22 @@ struct PipelineSelectorMTL
 	u8 pad[3];
 	PipelineSelectorMTL()
 	{
-		memset(this, 0, sizeof(*this));
+		memset(static_cast<void *>(this), 0, sizeof(*this));
 	}
 	PipelineSelectorMTL(GSHWDrawConfig::VSSelector vs, GSHWDrawConfig::PSSelector ps, PipelineSelectorExtrasMTL extras)
 	{
-		memset(this, 0, sizeof(*this));
+		memset(static_cast<void *>(this), 0, sizeof(*this));
 		this->vs = vs;
 		this->ps = ps;
 		this->extras = extras;
 	}
 	PipelineSelectorMTL(const PipelineSelectorMTL& other)
 	{
-		memcpy(this, &other, sizeof(other));
+		memcpy(static_cast<void *>(this), &other, sizeof(other));
 	}
 	PipelineSelectorMTL& operator=(const PipelineSelectorMTL& other)
 	{
-		memcpy(this, &other, sizeof(other));
+		memcpy(static_cast<void *>(this), &other, sizeof(other));
 		return *this;
 	}
 	bool operator==(const PipelineSelectorMTL& other) const
@@ -111,7 +111,7 @@ struct std::hash<PipelineSelectorMTL>
 	{
 		size_t h = 0;
 		size_t pieces[(sizeof(PipelineSelectorMTL) + sizeof(size_t) - 1) / sizeof(size_t)] = {};
-		memcpy(pieces, &sel, sizeof(PipelineSelectorMTL));
+		memcpy(static_cast<void *>(pieces), &sel, sizeof(PipelineSelectorMTL));
 		for (auto& piece : pieces)
 			HashCombine(h, piece);
 		return h;
