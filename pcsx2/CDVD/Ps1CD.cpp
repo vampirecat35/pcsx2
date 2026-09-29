@@ -158,6 +158,17 @@ static __fi void StopCdda()
 	}
 }
 
+// Setloc only memorizes the target in SetSectorSeek, SetSector is the position the drive is reading from.
+// The target is applied by the next read, seek or play command.
+static __fi void ApplySetloc()
+{
+	if (cdr.SetlocPending)
+	{
+		memcpy(cdr.SetSector, cdr.SetSectorSeek, 4);
+		cdr.SetlocPending = 0;
+	}
+}
+
 static __fi void SetResultSize(u8 size)
 {
 	cdr.ResultP = 0;
@@ -741,15 +752,16 @@ void cdrWrite1(u8 rt)
 			// Setloc is memorizing the wanted target, and marks it as unprocessed, and has no other effect
 			// (it doesn't start reading or seeking, and doesn't interrupt or redirect any active reads).
 			// But it does set the seek target. This is used to set the target then seperately start the seek after setloc
+			// Writing the target straight into SetSector redirected reads that were still running, so games that
+			// Setloc before stopping the current read got sectors from the wrong place. Needs proper testing.
 			int oldSector = msf_to_lsn(cdr.SetSector);
-			for (i = 0; i < 3; i++)
-				cdr.SetSector[i] = btoi(cdr.Param[i]);
-			cdr.SetSector[3] = 0;
-			if ((cdr.SetSector[0] | cdr.SetSector[1] | cdr.SetSector[2]) == 0)
+			if ((cdr.Param[0] | cdr.Param[1] | cdr.Param[2]) != 0)
 			{
-				*(u32*)cdr.SetSector = *(u32*)cdr.SetSectorSeek;
+				for (i = 0; i < 3; i++)
+					cdr.SetSectorSeek[i] = btoi(cdr.Param[i]);
+				cdr.SetSectorSeek[3] = 0;
 			}
-			int newSector = msf_to_lsn(cdr.SetSector);
+			int newSector = msf_to_lsn(cdr.SetSectorSeek);
 
 			// sectorSeekReadDelay should lead to sensible random seek results in QA (Aging Disk) test
 			sectorSeekReadDelay = abs(newSector - oldSector) * 100;
@@ -764,11 +776,7 @@ void cdrWrite1(u8 rt)
 		}
 		break;
 		case CdlPlay:
-			if (cdr.SetlocPending)
-			{
-				memcpy(cdr.SetSectorSeek, cdr.SetSector, 4);
-				cdr.SetlocPending = 0;
-			}
+			ApplySetloc();
 			cdr.Play = 1;
 			cdr.Ctrl |= 0x80;
 			cdr.Stat = NoIntr;
@@ -796,6 +804,7 @@ void cdrWrite1(u8 rt)
 		case CdlReadN:
 			cdr.Irq = 0;
 			StopReading();
+			ApplySetloc();
 			cdr.Ctrl |= 0x80;
 			cdr.Stat = NoIntr;
 			StartReading(1);
@@ -865,7 +874,10 @@ void cdrWrite1(u8 rt)
 				cdvd.DiscType = CDVD_TYPE_PSCDDA;
 			}
 
-			setPs1CDVDSpeed(cdvd.Speed);
+			// The PS1 drive runs at 1x (75 sectors/s), MODE_SPEED doubles it. cdvd.Speed is the PS2 drive speed (4x for CDs),
+			// using it here made reads so fast that games dropped sectors and loaded corrupt data. Needs proper testing
+			// with the PS2 "Fast" disc speed option.
+			setPs1CDVDSpeed(1);
 			AddIrqQueue(cdr.Cmd, 0x800);
 			break;
 
@@ -900,7 +912,10 @@ void cdrWrite1(u8 rt)
 			break;
 
 		case CdlSeekL:
-			((u32*)cdr.SetSectorSeek)[0] = ((u32*)cdr.SetSector)[0];
+			// Seeking stops any read in progress.
+			StopCdda();
+			StopReading();
+			ApplySetloc();
 			cdr.Ctrl |= 0x80;
 			cdr.Stat = NoIntr;
 
@@ -910,7 +925,10 @@ void cdrWrite1(u8 rt)
 			break;
 
 		case CdlSeekP:
-			((u32*)cdr.SetSectorSeek)[0] = ((u32*)cdr.SetSector)[0];
+			// Seeking stops any read in progress.
+			StopCdda();
+			StopReading();
+			ApplySetloc();
 			cdr.Ctrl |= 0x80;
 			cdr.Stat = NoIntr;
 
@@ -934,6 +952,7 @@ void cdrWrite1(u8 rt)
 		case CdlReadS:
 			cdr.Irq = 0;
 			StopReading();
+			ApplySetloc();
 			cdr.Ctrl |= 0x80;
 			cdr.Stat = NoIntr;
 			StartReading(2);
@@ -1071,7 +1090,9 @@ void psxDma3(u32 madr, u32 bcr, u32 chcr)
 
 			cdsize = (bcr & 0xffff) * 4;
 			memcpy(iopPhysMem(madr), cdr.pTransfer, cdsize);
-			psxCpu->Clear(madr, cdsize / 4);
+			// PS1 games often put a KSEG0 address (0x80xxxxxx) in MADR, the recompiler only clears physical addresses.
+			// Without the mask, code loaded from CD over already recompiled code kept running the stale blocks.
+			psxCpu->Clear(madr & 0x1fffffff, cdsize / 4);
 			cdr.pTransfer += cdsize;
 
 			break;
