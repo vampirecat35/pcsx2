@@ -346,6 +346,12 @@ private:
 	std::unique_ptr<GSTextureCacheSW::Texture> m_sw_texture[7 + 1];
 	std::unique_ptr<GSVirtualAlignedClass<32>> m_sw_rasterizer;
 
+	// PS1 24-bit display (PSGPU24) output, decoded on the CPU.
+	GSTexture* m_psgpu24_texture = nullptr;
+	std::vector<u32> m_psgpu24_buffer;
+
+	GSTexture* GetPSGPU24Output(GSPCRTCRegs::PCRTCDisplay& framebuffer, float& scale, int& y_offset);
+
 public:
 	GSRendererHW();
 	virtual ~GSRendererHW() override;

@@ -48,6 +48,8 @@ GSRendererHW::~GSRendererHW()
 
 void GSRendererHW::Destroy()
 {
+	delete m_psgpu24_texture;
+	m_psgpu24_texture = nullptr;
 	g_texture_cache->RemoveAll(true, true, true);
 	GSRenderer::Destroy();
 }
@@ -160,6 +162,9 @@ GSTexture* GSRendererHW::GetOutput(int i, float& scale, int& y_offset)
 	PCRTCDisplays.RemoveFramebufferOffset(i);
 	// TRACE(_T("[%d] GetOutput %d %05x (%d)\n"), (int)m_perfmon.GetFrame(), i, (int)TEX0.TBP0, (int)TEX0.PSM);
 
+	if (curFramebuffer.PSM == PSGPU24)
+		return GetPSGPU24Output(curFramebuffer, scale, y_offset);
+
 	GSTexture* t = nullptr;
 
 	GIFRegTEX0 TEX0 = {};
@@ -190,6 +195,57 @@ GSTexture* GSRendererHW::GetOutput(int i, float& scale, int& y_offset)
 	}
 
 	return t;
+}
+
+// PS1 mode 24-bit display: the CRTC reads packed RGB888 pixels straight out of the PSMCT16 PS1 VRAM that PS1DRV
+// keeps in GS memory. The texture cache has no way to represent that, so looking it up as a target gives garbage.
+// Read back anything the GPU drew there, then unpack the pixels on the CPU. This is only used for PS1 24-bit
+// output (mostly FMVs and stills), so the per-frame readback shouldn't matter much. Needs proper testing.
+GSTexture* GSRendererHW::GetPSGPU24Output(GSPCRTCRegs::PCRTCDisplay& framebuffer, float& scale, int& y_offset)
+{
+	const GSVector4i fb_rect = framebuffer.framebufferRect;
+	const int width = fb_rect.width();
+	const int height = fb_rect.height();
+	if (width <= 0 || height <= 0)
+		return nullptr;
+
+	const u32 bp = framebuffer.Block();
+	const u32 bw = framebuffer.FBW;
+
+	// Each output pixel is 3 bytes, so the row covers 1.5x as many 16-bit texels (plus one for odd starts).
+	const int texel_width = (width * 3 + 1) / 2 + 1;
+	const GSVector4i mem_rect = GSVector4i(fb_rect.x, fb_rect.y, fb_rect.x + texel_width, fb_rect.y + height).rintersect(GSVector4i(0, 0, 2048, 2048));
+	g_texture_cache->InvalidateLocalMem(m_mem.GetOffset(bp, bw, PSMCT16), mem_rect);
+
+	if (!g_gs_device->ResizeRenderTarget(&m_psgpu24_texture, width, height, false, false))
+		return nullptr;
+
+	m_psgpu24_buffer.resize(static_cast<size_t>(width) * height);
+	const GSOffset off = m_mem.GetOffset(bp, bw, PSMCT16);
+	constexpr u32 vm16_mask = (GS_MAX_BLOCKS * GS_BLOCK_SIZE / 2) - 1; // needs proper testing on wrapped framebuffers
+	for (int y = 0; y < height; y++)
+	{
+		const int py = (fb_rect.y + y) & 2047;
+		u32* line = &m_psgpu24_buffer[static_cast<size_t>(y) * width];
+		for (int x = 0; x < width; x++)
+		{
+			const int byte = x * 3;
+			const int px = fb_rect.x + (byte >> 1);
+			const u32 lo = m_mem.ReadPixel16(off.pa(px & 2047, py) & vm16_mask);
+			const u32 hi = m_mem.ReadPixel16(off.pa((px + 1) & 2047, py) & vm16_mask);
+			const u32 packed = (lo | (hi << 16)) >> ((byte & 1) * 8);
+			// Display output uses the equivalent of TA0 = 0x80 for 24-bit formats.
+			line[x] = (packed & 0x00FFFFFF) | 0x80000000;
+		}
+	}
+
+	m_psgpu24_texture->Update(GSVector4i(0, 0, width, height), m_psgpu24_buffer.data(), width * sizeof(u32));
+
+	// The texture now starts at the framebuffer origin.
+	framebuffer.framebufferRect = GSVector4i(0, 0, width, height);
+	scale = 1.0f;
+	y_offset = 0;
+	return m_psgpu24_texture;
 }
 
 GSTexture* GSRendererHW::GetFeedbackOutput(float& scale)
