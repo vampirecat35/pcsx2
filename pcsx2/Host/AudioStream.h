@@ -147,6 +147,12 @@ private:
 	static std::unique_ptr<AudioStream> CreateSDLAudioStream(u32 sample_rate, const AudioStreamParameters& parameters,
 		bool stretch_enabled, Error* error);
 
+#ifdef __APPLE__
+	static std::vector<DeviceInfo> GetCoreAudioOutputDevices();
+	static std::unique_ptr<AudioStream> CreateCoreAudioStream(u32 sample_rate, const AudioStreamParameters& parameters,
+		const char* device_name, bool stretch_enabled, Error* error);
+#endif
+
 	void AllocateBuffer();
 	void DestroyBuffer();
 

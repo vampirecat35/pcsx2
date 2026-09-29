@@ -14,6 +14,9 @@ enum class AudioBackend : u8
 	Null,
 	Cubeb,
 	SDL,
+#ifdef __APPLE__
+	CoreAudio,
+#endif
 	Count
 };
 

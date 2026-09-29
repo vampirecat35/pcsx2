@@ -90,11 +90,19 @@ AudioSettingsWidget::AudioSettingsWidget(SettingsWindow* settings_dialog, QWidge
 	connect(m_ui.resetStandardVolume, &QToolButton::clicked, this, [this]() { resetVolume(false); });
 	connect(m_ui.resetFastForwardVolume, &QToolButton::clicked, this, [this]() { resetVolume(true); });
 
+#ifdef __APPLE__
+	dialog()->registerWidgetHelp(
+		m_ui.audioBackend, tr("Audio Backend"), QStringLiteral("CoreAudio"),
+		tr("The audio backend determines how frames produced by the emulator are submitted to the host. CoreAudio "
+		   "outputs directly through the native macOS audio API, if you encounter issues, try the Cubeb or SDL backend. "
+		   "The null backend disables all host audio output."));
+#else
 	dialog()->registerWidgetHelp(
 		m_ui.audioBackend, tr("Audio Backend"), QStringLiteral("Cubeb"),
 		tr("The audio backend determines how frames produced by the emulator are submitted to the host. Cubeb provides the "
 		   "lowest latency, if you encounter issues, try the SDL backend. The null backend disables all host audio "
 		   "output."));
+#endif
 	dialog()->registerWidgetHelp(
 		m_ui.bufferMS, tr("Buffer Size"), tr("%1 ms").arg(AudioStreamParameters::DEFAULT_BUFFER_MS),
 		tr("Determines the buffer size which the time stretcher will try to keep filled. It effectively selects the "

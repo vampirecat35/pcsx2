@@ -848,6 +848,10 @@ set(pcsx2HostSources
 	Host/CubebAudioStream.cpp
 	Host/SDLAudioStream.cpp)
 
+if(APPLE)
+	list(APPEND pcsx2HostSources Host/CoreAudioAudioStream.cpp)
+endif()
+
 set(pcsx2HostHeaders
 	Host/AudioStream.h
 	Host/AudioStreamTypes.h)
@@ -1278,6 +1282,8 @@ if (APPLE)
 	find_library(QUARTZCORE_LIBRARY QuartzCore)
 	find_library(AVFOUNDATION_LIBRARY AVFoundation)
 	find_library(COREMEDIA_LIBRARY CoreMedia)
+	find_library(COREAUDIO_LIBRARY CoreAudio)
+	find_library(AUDIOTOOLBOX_LIBRARY AudioToolbox)
 	target_link_libraries(PCSX2_FLAGS INTERFACE
 		${APPKIT_LIBRARY}
 		${IOKIT_LIBRARY}
@@ -1285,6 +1291,8 @@ if (APPLE)
 		${QUARTZCORE_LIBRARY}
 		${AVFOUNDATION_LIBRARY}
 		${COREMEDIA_LIBRARY}
+		${COREAUDIO_LIBRARY}
+		${AUDIOTOOLBOX_LIBRARY}
 	)
 endif()
 
