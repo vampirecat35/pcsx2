@@ -136,7 +136,7 @@ public:
 private:
 	// Helper method to create a Vulkan instance.
 	static VkInstance CreateVulkanInstance(const WindowInfo& wi, OptionalExtensions* oe, bool enable_debug_utils,
-		bool enable_validation_layer);
+		bool enable_validation_layer, bool vulkan13 = false);
 
 	// Enable/disable debug message runtime.
 	bool EnableDebugUtils();
@@ -188,6 +188,15 @@ private:
 	bool SelectDeviceFeatures();
 	bool CreateDevice(VkSurfaceKHR surface, bool enable_validation_layer);
 	bool ProcessDeviceExtensions();
+
+	// DLSS-NR: lending the instance and device to the model (GSDLSSNR::ShareVulkan()).
+	static bool WantDLSSNRShare();
+	void SelectDLSSNRFeatures();
+	void ShareVulkanWithDLSSNR();
+	void WithdrawVulkanFromDLSSNR();
+	std::unique_lock<std::mutex> LockQueues();
+	static void LockQueuesThunk(void* self);
+	static void UnlockQueuesThunk(void* self);
 
 	bool CreateAllocator();
 	bool CreateCommandBuffers();
@@ -276,6 +285,20 @@ private:
 	bool m_spinning_supported = false;
 	bool m_spin_queue_is_graphics_queue = false;
 	bool m_spin_buffer_initialized = false;
+
+	// DLSS-NR on this device: what CreateDevice() enabled for the model, and its queue. While
+	// the model has the device, m_queue_mutex is held around every submit, present and
+	// vkDeviceWaitIdle here and by the model around its own submits (vkDeviceWaitIdle needs
+	// every queue of the device synchronized, not only the one the model shares).
+	std::mutex m_queue_mutex;
+	VkQueue m_dlssnr_queue = VK_NULL_HANDLE;
+	u32 m_dlssnr_queue_family_index = 0;
+	bool m_vulkan13_instance = false;
+	bool m_dlssnr_features = false;
+	bool m_dlssnr_coopmat = false;
+	bool m_dlssnr_explicit_layout = false;
+	bool m_dlssnr_portability_subset = false;
+	bool m_dlssnr_shared = false;
 
 	VkQueryPool m_timestamp_query_pool = VK_NULL_HANDLE;
 	float m_accumulated_gpu_time = 0.0f;

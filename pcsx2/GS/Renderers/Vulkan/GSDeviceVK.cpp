@@ -10,6 +10,7 @@
 #include "GS/Renderers/Vulkan/VKShaderCache.h"
 #include "GS/Renderers/Vulkan/VKSwapChain.h"
 #include "GS/Renderers/Common/GSDevice.h"
+#include "GS/Renderers/Common/GSDLSSNR.h"
 
 #include "BuildVersion.h"
 #include "Host.h"
@@ -95,7 +96,7 @@ GSDeviceVK::GSDeviceVK()
 GSDeviceVK::~GSDeviceVK() = default;
 
 VkInstance GSDeviceVK::CreateVulkanInstance(const WindowInfo& wi, OptionalExtensions* oe, bool enable_debug_utils,
-	bool enable_validation_layer)
+	bool enable_validation_layer, bool vulkan13)
 {
 	ExtensionList enabled_extensions;
 	if (!SelectInstanceExtensions(&enabled_extensions, wi, oe, enable_debug_utils))
@@ -110,7 +111,8 @@ VkInstance GSDeviceVK::CreateVulkanInstance(const WindowInfo& wi, OptionalExtens
 	app_info.pEngineName = "PCSX2";
 	app_info.engineVersion = VK_MAKE_VERSION(
 		BuildVersion::GitTagHi, BuildVersion::GitTagMid, BuildVersion::GitTagLo);
-	app_info.apiVersion = VK_API_VERSION_1_1;
+	// 1.3 only for DLSS-NR, whose model needs it to run on this instance (see WantDLSSNRShare()).
+	app_info.apiVersion = vulkan13 ? VK_API_VERSION_1_3 : VK_API_VERSION_1_1;
 
 	VkInstanceCreateInfo instance_create_info = {};
 	instance_create_info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
@@ -549,14 +551,17 @@ bool GSDeviceVK::CreateDevice(VkSurfaceKHR surface, bool enable_validation_layer
 		return false;
 	}
 
+	SelectDLSSNRFeatures();
+
 	VkDeviceCreateInfo device_info = {};
 	device_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
 	device_info.pNext = nullptr;
 	device_info.flags = 0;
 	device_info.queueCreateInfoCount = 0;
 
-	static constexpr float queue_priorities[] = {1.0f, 0.0f}; // Low priority for the spin queue
-	std::array<VkDeviceQueueCreateInfo, 3> queue_infos;
+	// Low priority for the spin queue, and for the DLSS-NR model's queue when it gets one of its own.
+	static constexpr float queue_priorities[] = {1.0f, 0.0f, 0.0f};
+	std::array<VkDeviceQueueCreateInfo, 4> queue_infos;
 	VkDeviceQueueCreateInfo& graphics_queue_info = queue_infos[device_info.queueCreateInfoCount++];
 	graphics_queue_info.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
 	graphics_queue_info.pNext = nullptr;
@@ -597,11 +602,80 @@ bool GSDeviceVK::CreateDevice(VkSurfaceKHR surface, bool enable_validation_layer
 		spin_queue_info.pQueuePriorities = queue_priorities + 1;
 	}
 
+	// A queue for the DLSS-NR model: one of a compute family we don't draw or present on, else
+	// another queue of the graphics family, else the graphics queue itself (m_queue_mutex covers it).
+	u32 dlssnr_queue_index = 0;
+	bool dlssnr_graphics_queue = false;
+	if (m_dlssnr_features)
+	{
+		const auto find_queue_info = [&](u32 family) -> VkDeviceQueueCreateInfo* {
+			for (u32 i = 0; i < device_info.queueCreateInfoCount; i++)
+			{
+				if (queue_infos[i].queueFamilyIndex == family)
+					return &queue_infos[i];
+			}
+			return nullptr;
+		};
+		// Takes another queue of family, if it has one left.
+		const auto add_queue = [&](u32 family) {
+			VkDeviceQueueCreateInfo* info = find_queue_info(family);
+			const u32 used = info ? info->queueCount : 0;
+			const size_t priorities = std::size(queue_priorities) - (info ? (info->pQueuePriorities - queue_priorities) : 1);
+			if (used >= queue_family_properties[family].queueCount || used >= priorities)
+				return false;
+			if (!info)
+			{
+				info = &queue_infos[device_info.queueCreateInfoCount++];
+				info->sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+				info->pNext = nullptr;
+				info->flags = 0;
+				info->queueFamilyIndex = family;
+				info->queueCount = 0;
+				info->pQueuePriorities = queue_priorities + 1;
+			}
+			info->queueCount++;
+			m_dlssnr_queue_family_index = family;
+			dlssnr_queue_index = used;
+			return true;
+		};
+
+		bool found = false;
+		for (u32 i = 0; i < queue_family_count && !found; i++)
+		{
+			if ((queue_family_properties[i].queueFlags & VK_QUEUE_COMPUTE_BIT) && i != m_graphics_queue_family_index &&
+				i != m_present_queue_family_index)
+			{
+				found = add_queue(i);
+			}
+		}
+		if (!found && !add_queue(m_graphics_queue_family_index))
+		{
+			// Graphics families always support compute.
+			m_dlssnr_queue_family_index = m_graphics_queue_family_index;
+			dlssnr_graphics_queue = true;
+		}
+	}
+
 	device_info.pQueueCreateInfos = queue_infos.data();
 
 	ExtensionList enabled_extensions;
 	if (!SelectDeviceExtensions(&enabled_extensions, surface != VK_NULL_HANDLE))
 		return false;
+
+	if (m_dlssnr_features)
+	{
+		if (m_dlssnr_coopmat)
+			enabled_extensions.push_back(VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME);
+		if (m_dlssnr_explicit_layout)
+			enabled_extensions.push_back(VK_KHR_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_EXTENSION_NAME);
+		// The model needs it enabled where the device offers it (MoltenVK). A beta extension, so no macro.
+		if (m_dlssnr_portability_subset &&
+			std::none_of(enabled_extensions.begin(), enabled_extensions.end(),
+				[](const char* name) { return std::strcmp(name, "VK_KHR_portability_subset") == 0; }))
+		{
+			enabled_extensions.push_back("VK_KHR_portability_subset");
+		}
+	}
 
 	device_info.enabledExtensionCount = static_cast<uint32_t>(enabled_extensions.size());
 	device_info.ppEnabledExtensionNames = enabled_extensions.data();
@@ -666,6 +740,39 @@ bool GSDeviceVK::CreateDevice(VkSurfaceKHR surface, bool enable_validation_layer
 		Vulkan::AddPointerToChain(&device_info, &fragment_shader_interlock_ext_feature);
 	}
 
+	// What the DLSS-NR model needs (see nr_frame_adopt_vulkan()), only when SelectDLSSNRFeatures()
+	// found all of it. The 1.1/1.2 structs are fine beside pEnabledFeatures; none of the
+	// structs above are promoted into them.
+	VkPhysicalDeviceVulkan11Features dlssnr_features11 = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES};
+	VkPhysicalDeviceVulkan12Features dlssnr_features12 = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES};
+	VkPhysicalDeviceCooperativeMatrixFeaturesKHR dlssnr_coopmat_feature = {
+		VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_FEATURES_KHR};
+	VkPhysicalDeviceWorkgroupMemoryExplicitLayoutFeaturesKHR dlssnr_explicit_layout_feature = {
+		VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_FEATURES_KHR};
+	if (m_dlssnr_features)
+	{
+		dlssnr_features11.storageBuffer16BitAccess = VK_TRUE;
+		dlssnr_features12.vulkanMemoryModel = VK_TRUE;
+		dlssnr_features12.vulkanMemoryModelDeviceScope = VK_TRUE;
+		dlssnr_features12.shaderFloat16 = VK_TRUE;
+		dlssnr_features12.bufferDeviceAddress = VK_TRUE;
+		dlssnr_features12.scalarBlockLayout = VK_TRUE;
+		Vulkan::AddPointerToChain(&device_info, &dlssnr_features11);
+		Vulkan::AddPointerToChain(&device_info, &dlssnr_features12);
+		if (m_dlssnr_coopmat)
+		{
+			dlssnr_coopmat_feature.cooperativeMatrix = VK_TRUE;
+			Vulkan::AddPointerToChain(&device_info, &dlssnr_coopmat_feature);
+		}
+		if (m_dlssnr_explicit_layout)
+		{
+			dlssnr_explicit_layout_feature.workgroupMemoryExplicitLayout = VK_TRUE;
+			dlssnr_explicit_layout_feature.workgroupMemoryExplicitLayoutScalarBlockLayout = VK_TRUE;
+			dlssnr_explicit_layout_feature.workgroupMemoryExplicitLayout16BitAccess = VK_TRUE;
+			Vulkan::AddPointerToChain(&device_info, &dlssnr_explicit_layout_feature);
+		}
+	}
+
 	VkResult res = vkCreateDevice(m_physical_device, &device_info, nullptr, &m_device);
 	if (res != VK_SUCCESS)
 	{
@@ -682,6 +789,15 @@ bool GSDeviceVK::CreateDevice(VkSurfaceKHR surface, bool enable_validation_layer
 	if (surface)
 	{
 		vkGetDeviceQueue(m_device, m_present_queue_family_index, 0, &m_present_queue);
+	}
+	if (m_dlssnr_features)
+	{
+		if (dlssnr_graphics_queue)
+			m_dlssnr_queue = m_graphics_queue;
+		else
+			vkGetDeviceQueue(m_device, m_dlssnr_queue_family_index, dlssnr_queue_index, &m_dlssnr_queue);
+		DevCon.WriteLn("VK: DLSS-NR queue: family %u index %u%s", m_dlssnr_queue_family_index, dlssnr_queue_index,
+			dlssnr_graphics_queue ? " (the graphics queue)" : "");
 	}
 	m_spinning_supported = m_spin_queue_family_index != queue_family_count &&
 	                       queue_family_properties[m_graphics_queue_family_index].timestampValidBits > 0 &&
@@ -721,6 +837,120 @@ bool GSDeviceVK::CreateDevice(VkSurfaceKHR surface, bool enable_validation_layer
 	}
 
 	return true;
+}
+
+bool GSDeviceVK::WantDLSSNRShare()
+{
+	return GSDLSSNR::IsAvailable() && GSConfig.DLSSNR;
+}
+
+void GSDeviceVK::SelectDLSSNRFeatures()
+{
+	// Vulkan 1.3 and the features in nr_frame_adopt_vulkan(), only when DLSS-NR is on and the
+	// device has them all. Otherwise nothing changes here and the model opens its own instance.
+	m_dlssnr_features = false;
+	m_dlssnr_coopmat = false;
+	m_dlssnr_explicit_layout = false;
+	m_dlssnr_portability_subset = false;
+	m_dlssnr_queue = VK_NULL_HANDLE;
+	if (!m_vulkan13_instance || m_device_properties.apiVersion < VK_API_VERSION_1_3 || !vkGetPhysicalDeviceFeatures2)
+		return;
+
+	u32 extension_count = 0;
+	if (vkEnumerateDeviceExtensionProperties(m_physical_device, nullptr, &extension_count, nullptr) != VK_SUCCESS)
+		return;
+	std::vector<VkExtensionProperties> extensions(extension_count);
+	if (vkEnumerateDeviceExtensionProperties(m_physical_device, nullptr, &extension_count, extensions.data()) != VK_SUCCESS)
+		return;
+	const auto has_extension = [&extensions](const char* name) {
+		return std::any_of(extensions.begin(), extensions.end(),
+			[name](const VkExtensionProperties& e) { return std::strcmp(e.extensionName, name) == 0; });
+	};
+	const bool has_coopmat = has_extension(VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME);
+	const bool has_explicit_layout = has_extension(VK_KHR_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_EXTENSION_NAME);
+
+	VkPhysicalDeviceFeatures2 features2 = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
+	VkPhysicalDeviceVulkan11Features features11 = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES};
+	VkPhysicalDeviceVulkan12Features features12 = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES};
+	VkPhysicalDeviceCooperativeMatrixFeaturesKHR coopmat = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_FEATURES_KHR};
+	VkPhysicalDeviceWorkgroupMemoryExplicitLayoutFeaturesKHR explicit_layout = {
+		VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_FEATURES_KHR};
+	Vulkan::AddPointerToChain(&features2, &features11);
+	Vulkan::AddPointerToChain(&features2, &features12);
+	if (has_coopmat)
+		Vulkan::AddPointerToChain(&features2, &coopmat);
+	if (has_coopmat && has_explicit_layout)
+		Vulkan::AddPointerToChain(&features2, &explicit_layout);
+	vkGetPhysicalDeviceFeatures2(m_physical_device, &features2);
+
+	if (!features11.storageBuffer16BitAccess || !features12.vulkanMemoryModel ||
+		!features12.vulkanMemoryModelDeviceScope || !features12.shaderFloat16 || !features12.bufferDeviceAddress ||
+		!features12.scalarBlockLayout)
+	{
+		WARNING_LOG("VK: {} lacks a feature the DLSS-NR model needs; it will use a Vulkan device of its own.", m_name);
+		return;
+	}
+
+	m_dlssnr_features = true;
+	m_dlssnr_coopmat = has_coopmat && coopmat.cooperativeMatrix;
+	// The model's staged GEMM needs this; without it those shapes run on the smaller kernels.
+	m_dlssnr_explicit_layout = m_dlssnr_coopmat && has_explicit_layout &&
+							   explicit_layout.workgroupMemoryExplicitLayout &&
+							   explicit_layout.workgroupMemoryExplicitLayoutScalarBlockLayout &&
+							   explicit_layout.workgroupMemoryExplicitLayout16BitAccess;
+	m_dlssnr_portability_subset = has_extension("VK_KHR_portability_subset");
+	INFO_LOG("VK: enabling the DLSS-NR model's features (cooperative matrix: {}, explicit layout: {})",
+		m_dlssnr_coopmat, m_dlssnr_explicit_layout);
+}
+
+std::unique_lock<std::mutex> GSDeviceVK::LockQueues()
+{
+	// Only contended while the DLSS-NR model has the device.
+	return m_dlssnr_shared ? std::unique_lock<std::mutex>(m_queue_mutex) : std::unique_lock<std::mutex>();
+}
+
+void GSDeviceVK::LockQueuesThunk(void* self)
+{
+	static_cast<GSDeviceVK*>(self)->m_queue_mutex.lock();
+}
+
+void GSDeviceVK::UnlockQueuesThunk(void* self)
+{
+	static_cast<GSDeviceVK*>(self)->m_queue_mutex.unlock();
+}
+
+void GSDeviceVK::ShareVulkanWithDLSSNR()
+{
+	if (!m_dlssnr_features || m_dlssnr_queue == VK_NULL_HANDLE)
+		return;
+
+	GSDLSSNR::VulkanShare share;
+	share.instance = m_instance;
+	share.physical_device = m_physical_device;
+	share.device = m_device;
+	share.queue = m_dlssnr_queue;
+	share.queue_family = m_dlssnr_queue_family_index;
+	share.cooperative_matrix = m_dlssnr_coopmat;
+	share.workgroup_memory_explicit_layout = m_dlssnr_explicit_layout;
+	share.get_instance_proc_addr = reinterpret_cast<void*>(vkGetInstanceProcAddr);
+	share.lock = &GSDeviceVK::LockQueuesThunk;
+	share.unlock = &GSDeviceVK::UnlockQueuesThunk;
+	share.lock_context = this;
+
+	// Set before the model can open, so every queue access from here on takes the lock.
+	m_dlssnr_shared = true;
+	GSDLSSNR::ShareVulkan(share);
+	INFO_LOG("VK: Vulkan instance and device lent to the DLSS-NR model. Needs proper testing.");
+}
+
+void GSDeviceVK::WithdrawVulkanFromDLSSNR()
+{
+	if (!m_dlssnr_shared)
+		return;
+
+	// Stops the model and releases the device before we destroy it.
+	GSDLSSNR::WithdrawVulkanShare();
+	m_dlssnr_shared = false;
 }
 
 bool GSDeviceVK::ProcessDeviceExtensions()
@@ -1124,6 +1354,7 @@ void GSDeviceVK::WaitForFenceCounter(u64 fence_counter)
 
 void GSDeviceVK::WaitForGPUIdle()
 {
+	const auto queue_lock = LockQueues();
 	vkDeviceWaitIdle(m_device);
 }
 
@@ -1382,6 +1613,8 @@ void GSDeviceVK::SubmitCommandBuffer(VKSwapChain* present_swap_chain)
 		submit_info.pSignalSemaphores = &m_spin_resources[m_current_frame].semaphore;
 	}
 
+	// Held through the spin submit and the present, which may be on queues the DLSS-NR model shares.
+	auto queue_lock = LockQueues();
 	res = vkQueueSubmit(m_graphics_queue, 1, &submit_info, resources.fence);
 	if (res != VK_SUCCESS)
 	{
@@ -1413,6 +1646,9 @@ void GSDeviceVK::SubmitCommandBuffer(VKSwapChain* present_swap_chain)
 
 			return;
 		}
+
+		if (queue_lock.owns_lock())
+			queue_lock.unlock();
 
 		// Grab the next image as soon as possible, that way we spend less time blocked on the next
 		// submission. Don't care if it fails, we'll deal with that at the presentation call site.
@@ -2269,6 +2505,7 @@ void GSDeviceVK::Destroy()
 	std::unique_lock lock(s_instance_mutex);
 
 	GSDevice::Destroy();
+	WithdrawVulkanFromDLSSNR();
 
 	EndRenderPass();
 	if (GetCurrentCommandBuffer() != VK_NULL_HANDLE)
@@ -2653,7 +2890,19 @@ bool GSDeviceVK::CreateDeviceAndSwapChain()
 	if (!AcquireWindow(true))
 		return false;
 
-	m_instance = CreateVulkanInstance(m_window_info, &m_optional_extensions, enable_debug_utils, enable_validation_layer);
+	// The DLSS-NR model can share this instance only if it is Vulkan 1.3.
+	m_vulkan13_instance = false;
+	if (WantDLSSNRShare())
+	{
+		u32 loader_version = 0;
+		m_vulkan13_instance = vkEnumerateInstanceVersion && vkEnumerateInstanceVersion(&loader_version) == VK_SUCCESS &&
+							  loader_version >= VK_API_VERSION_1_3;
+		if (!m_vulkan13_instance)
+			WARNING_LOG("VK: the Vulkan loader is below 1.3; the DLSS-NR model will use an instance of its own.");
+	}
+
+	m_instance = CreateVulkanInstance(
+		m_window_info, &m_optional_extensions, enable_debug_utils, enable_validation_layer, m_vulkan13_instance);
 	if (m_instance == VK_NULL_HANDLE)
 	{
 		if (enable_debug_utils || enable_validation_layer)
@@ -2661,7 +2910,8 @@ bool GSDeviceVK::CreateDeviceAndSwapChain()
 			// Try again without the validation layer.
 			enable_debug_utils = false;
 			enable_validation_layer = false;
-			m_instance = CreateVulkanInstance(m_window_info, &m_optional_extensions, enable_debug_utils, enable_validation_layer);
+			m_instance = CreateVulkanInstance(
+				m_window_info, &m_optional_extensions, enable_debug_utils, enable_validation_layer, m_vulkan13_instance);
 			if (m_instance == VK_NULL_HANDLE)
 			{
 				Host::ReportErrorAsync("Error", "Failed to create Vulkan instance. Does your GPU and/or driver support Vulkan?");
@@ -2774,6 +3024,9 @@ bool GSDeviceVK::CreateDeviceAndSwapChain()
 	// Render a frame as soon as possible to clear out whatever was previously being displayed.
 	if (m_window_info.type != WindowInfo::Type::Surfaceless)
 		RenderBlankFrame();
+
+	// DLSS-NR opens on the first frame it gets, so it takes the device from there on.
+	ShareVulkanWithDLSSNR();
 
 	return true;
 }

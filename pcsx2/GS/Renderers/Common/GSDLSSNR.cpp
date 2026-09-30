@@ -116,6 +116,12 @@ namespace
 	};
 
 	static DLSSNRPipeline s_pipe;
+
+	// The renderer's Vulkan objects, adopted by NetworkStage() when the model opens. Set and
+	// cleared on the GS thread while the pipeline is stopped; the mutex is for NetworkStage().
+	static std::mutex s_share_mutex;
+	static bool s_has_share = false;
+	static GSDLSSNR::VulkanShare s_share;
 } // namespace
 
 bool GSDLSSNR::IsAvailable()
@@ -536,12 +542,45 @@ static void NetworkStage()
 {
 	Threading::SetNameOfCurrentThread("DLSS-NR Network");
 
+	// On the renderer's instance and device when it lent them (see ShareVulkan()).
+	std::string share_error;
+	bool adopted = false;
+	{
+		std::unique_lock share_lock(s_share_mutex);
+		if (s_has_share)
+		{
+			const GSDLSSNR::VulkanShare& v = s_share;
+			const int flags = (v.cooperative_matrix ? 1 : 0) |
+							  (v.cooperative_matrix && v.workgroup_memory_explicit_layout ? 2 : 0);
+			if (nr_frame_adopt_vulkan(v.instance, v.physical_device, v.device, v.queue, v.queue_family, flags,
+					v.get_instance_proc_addr, v.lock, v.unlock, v.lock_context) == 0)
+			{
+				adopted = true;
+			}
+			else
+			{
+				share_error = nr_frame_error();
+			}
+		}
+	}
+
 	// NULL: the weights compiled into libdlssnr.
 	nr_frame* frame = nr_frame_open(nullptr);
+	if (!frame && adopted)
+	{
+		// The renderer's device wouldn't take the graph: try an instance of the model's own.
+		share_error = nr_frame_error();
+		nr_frame_shutdown();
+		adopted = false;
+		frame = nr_frame_open(nullptr);
+	}
 	if (frame)
 	{
-		Console.WriteLn("DLSS-NR: running on %s (%s runtime, %s)", nr_frame_device(frame), nr_frame_runtime(),
-			nr_frame_gemm_path(frame));
+		const bool shared = adopted && nr_frame_shared_device() == 1;
+		Console.WriteLn("DLSS-NR: running on %s (%s runtime, %s)%s", nr_frame_device(frame), nr_frame_runtime(),
+			nr_frame_gemm_path(frame), shared ? " [renderer's Vulkan instance and device]" : "");
+		if (!shared && !share_error.empty())
+			Console.Warning("DLSS-NR: couldn't share the renderer's Vulkan device, using its own: %s", share_error.c_str());
 	}
 	else
 	{
@@ -683,6 +722,26 @@ void GSDLSSNR::Shutdown()
 	// failed is kept: a model that couldn't open once won't open on the next device either.
 }
 
+void GSDLSSNR::ShareVulkan(const VulkanShare& share)
+{
+	// Whatever runs now runs elsewhere; the next Submit() reopens the model on this device.
+	Shutdown();
+
+	std::unique_lock lock(s_share_mutex);
+	s_share = share;
+	s_has_share = true;
+}
+
+void GSDLSSNR::WithdrawVulkanShare()
+{
+	// Closes the model and releases the device (nr_frame_shutdown()) before the renderer destroys it.
+	Shutdown();
+
+	std::unique_lock lock(s_share_mutex);
+	s_share = VulkanShare();
+	s_has_share = false;
+}
+
 #else
 
 bool GSDLSSNR::IsAvailable()
@@ -710,6 +769,14 @@ void GSDLSSNR::ResetHistory()
 }
 
 void GSDLSSNR::Shutdown()
+{
+}
+
+void GSDLSSNR::ShareVulkan(const VulkanShare& share)
+{
+}
+
+void GSDLSSNR::WithdrawVulkanShare()
 {
 }
 

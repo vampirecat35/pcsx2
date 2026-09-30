@@ -65,4 +65,32 @@ namespace GSDLSSNR
 
 	/// Stops the pipeline, closes the model and releases its device.
 	void Shutdown();
+
+	/// Vulkan objects the renderer lends to the model, as opaque pointers so this header needs no
+	/// Vulkan include: VkInstance, VkPhysicalDevice, VkDevice, VkQueue. The requirements are the
+	/// ones documented for nr_frame_adopt_vulkan().
+	struct VulkanShare
+	{
+		void* instance = nullptr;
+		void* physical_device = nullptr;
+		void* device = nullptr;
+		// A compute-capable queue of queue_family. lock/unlock bracket every submit the model
+		// makes; the renderer takes the same lock around its own submits, presents and idle waits.
+		void* queue = nullptr;
+		u32 queue_family = 0;
+		bool cooperative_matrix = false; // VK_KHR_cooperative_matrix is enabled on device
+		bool workgroup_memory_explicit_layout = false; // VK_KHR_workgroup_memory_explicit_layout too
+		void* get_instance_proc_addr = nullptr; // the vkGetInstanceProcAddr that made instance
+		void (*lock)(void*) = nullptr;
+		void (*unlock)(void*) = nullptr;
+		void* lock_context = nullptr;
+	};
+
+	/// Registers the device the model runs on from its next start. A running pipeline is stopped
+	/// first, so the next Submit() reopens the model there. If the device won't take the model,
+	/// it falls back to an instance of its own.
+	void ShareVulkan(const VulkanShare& share);
+
+	/// Stops the pipeline and drops the registered share. Call before destroying the device.
+	void WithdrawVulkanShare();
 } // namespace GSDLSSNR

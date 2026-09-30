@@ -934,7 +934,9 @@ bool Pcsx2Config::GSOptions::RestartOptionsAreEqual(const GSOptions& right) cons
 		   OpEqu(OverrideTextureBarriers) &&
 		   OpEqu(DepthFeedbackMode) &&
 		   OpEqu(HWAA1) &&
-		   OpEqu(ExclusiveFullscreenControl);
+		   OpEqu(ExclusiveFullscreenControl) &&
+		   // Vulkan creates its device for DLSS-NR to share only while it is on (GSDeviceVK::WantDLSSNRShare()).
+		   ((Renderer != GSRendererType::VK && Renderer != GSRendererType::Auto) || OpEqu(DLSSNR));
 }
 
 void Pcsx2Config::GSOptions::LoadSave(SettingsWrapper& wrap)
